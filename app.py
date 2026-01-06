@@ -1,6 +1,6 @@
 """
 AI Trading Signal Analyzer Server - FREE VERSION
-Uses Hugging Face (100% Free) instead of paid APIs
+Uses Hugging Face (100% Free) - FIXED for TradingView
 """
 
 from flask import Flask, request, jsonify
@@ -23,29 +23,42 @@ recent_analyses = []
 def analyze_with_free_ai(signal_data):
     """
     Use FREE Hugging Face AI to analyze the trading signal
-    Model: Mistral-7B (Free, no credit card needed)
+    Model: Llama-3.2-3B (Free, no credit card needed)
     """
     try:
+        # ✅ FIXED: Use correct field names from Pine Script
+        ticker = signal_data.get('ticker') or signal_data.get('symbol', 'UNKNOWN')
+        signal = signal_data.get('signal') or signal_data.get('signal_type', 'UNKNOWN')
+        
         # Create comprehensive prompt for AI analysis
         prompt = f"""<s>[INST] You are an expert technical analyst. Analyze this trading signal and provide a confidence score.
 
 Signal Data:
-- Symbol: {signal_data.get('symbol')}
-- Price: ${signal_data.get('price')}
-- Signal Type: {signal_data.get('signal_type')}
-- Base Confidence: {signal_data.get('confidence')}%
+- Ticker: {ticker}
+- Price: ${signal_data.get('price', 0)}
+- Signal Type: {signal}
+- Base Confidence: {signal_data.get('confidence', 0)}%
 
 Technical Indicators:
-- RSI: {signal_data.get('rsi')} (Overbought >70, Oversold <30)
-- ADX: {signal_data.get('adx')} (Trend strength, >25 is strong)
-- Volume Ratio: {signal_data.get('volume_ratio')}x (>1.5 is high)
-- ATR%: {signal_data.get('atr_percent')}%
-- VWAP Position: {signal_data.get('vwap_position')}
+- RSI: {signal_data.get('indicators', {}).get('rsi', 'N/A')} (Overbought >70, Oversold <30)
+- MACD: {signal_data.get('indicators', {}).get('macd', 'N/A')}
+- ADX: {signal_data.get('indicators', {}).get('adx', 'N/A')} (Trend strength, >25 is strong)
+- Volume Ratio: {signal_data.get('indicators', {}).get('volume_ratio', 1.0)}x
+- ATR: {signal_data.get('indicators', {}).get('atr', 'N/A')}
 
-Waddah Attar: Bullish={signal_data.get('waddah_bullish')}, Bearish={signal_data.get('waddah_bearish')}, Explosive={signal_data.get('waddah_explosive')}
-Squeeze: Status={signal_data.get('squeeze_status')}, Momentum={signal_data.get('squeeze_momentum')}
-Supertrend: {signal_data.get('supertrend')}, MFI: {signal_data.get('mfi')}, Fisher: {signal_data.get('fisher')}
-Market: EMA={signal_data.get('ema_alignment')}, HTF={signal_data.get('htf_trend')}, Pattern={signal_data.get('pattern')}
+AI Scores:
+- Waddah: {signal_data.get('scores', {}).get('waddah', 'N/A')}
+- Squeeze: {signal_data.get('scores', {}).get('squeeze', 'N/A')}
+- VWAP: {signal_data.get('scores', {}).get('vwap', 'N/A')}
+- Supertrend: {signal_data.get('scores', {}).get('supertrend', 'N/A')}
+- MFI: {signal_data.get('scores', {}).get('mfi', 'N/A')}
+- Fisher: {signal_data.get('scores', {}).get('fisher', 'N/A')}
+
+Conditions:
+- Waddah Explosive: {signal_data.get('conditions', {}).get('waddah_explosive', False)}
+- Squeeze Firing: {signal_data.get('conditions', {}).get('squeeze_firing', False)}
+- Strong Trend: {signal_data.get('conditions', {}).get('strong_trend', False)}
+- High Volume: {signal_data.get('conditions', {}).get('high_volume', False)}
 
 Provide analysis in this EXACT format:
 CONFIDENCE: [number 0-100]
@@ -70,12 +83,16 @@ REASON: [1-2 sentence explanation] [/INST]"""
             }
         }
         
+        print(f"🤖 Calling Hugging Face AI (Llama-3.2)...")
+        
         # Call Hugging Face API
         response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             result = response.json()
             ai_text = result[0]['generated_text'] if isinstance(result, list) else result.get('generated_text', '')
+            
+            print(f"✅ AI Response received: {len(ai_text)} chars")
             
             # Parse AI response
             confidence = 70  # Default
@@ -119,11 +136,13 @@ REASON: [1-2 sentence explanation] [/INST]"""
             
             # If parsing failed, use basic heuristics
             if not strengths:
-                strengths = ["Strong momentum" if signal_data.get('adx', 0) > 25 else "Moderate setup"]
+                strengths = ["Strong momentum" if signal_data.get('indicators', {}).get('adx', 0) > 25 else "Moderate setup"]
             if not concerns:
                 concerns = ["Monitor risk levels"]
             if len(reasoning) < 10:
                 reasoning = f"Signal shows {recommendation.lower()} potential with {confidence}% confidence"
+            
+            print(f"✅ Analysis complete: {recommendation} - {confidence}%")
             
             return {
                 "success": True,
@@ -134,18 +153,19 @@ REASON: [1-2 sentence explanation] [/INST]"""
                 "concerns": concerns[:2],
                 "reasoning": reasoning,
                 "timestamp": datetime.utcnow().isoformat(),
-                "model": "Mistral-7B-Free"
+                "model": "Llama-3.2-3B",
+                "full_response": ai_text[:500]  # Include partial response for debugging
             }
         
         elif response.status_code == 503:
-            # Model is loading, use fallback logic
+            print("⏱️ Model is loading, using fallback...")
             return use_fallback_analysis(signal_data)
         else:
-            print(f"API Error: {response.status_code} - {response.text}")
+            print(f"❌ API Error: {response.status_code} - {response.text}")
             return use_fallback_analysis(signal_data)
             
     except Exception as e:
-        print(f"AI Analysis Error: {e}")
+        print(f"❌ AI Analysis Error: {e}")
         return use_fallback_analysis(signal_data)
 
 def use_fallback_analysis(signal_data):
@@ -153,19 +173,27 @@ def use_fallback_analysis(signal_data):
     Fallback logic-based analysis when AI is unavailable
     """
     confidence = signal_data.get('confidence', 70)
-    signal_type = signal_data.get('signal_type', 'BUY')
-    rsi = signal_data.get('rsi', 50)
-    adx = signal_data.get('adx', 20)
-    volume_ratio = signal_data.get('volume_ratio', 1.0)
+    signal = signal_data.get('signal') or signal_data.get('signal_type', 'BUY')
+    
+    # Get indicators from nested structure
+    indicators = signal_data.get('indicators', {})
+    rsi = indicators.get('rsi', 50)
+    adx = indicators.get('adx', 20)
+    volume_ratio = indicators.get('volume_ratio', 1.0)
+    
+    # Get scores
+    scores = signal_data.get('scores', {})
+    waddah = scores.get('waddah', 0)
+    squeeze = scores.get('squeeze', 0)
     
     # Calculate adjusted confidence
     if adx > 25:
         confidence += 5
     if volume_ratio > 1.5:
         confidence += 5
-    if signal_type == 'BUY' and rsi < 30:
+    if waddah > 70:
         confidence += 10
-    elif signal_type == 'SELL' and rsi > 70:
+    if squeeze > 70:
         confidence += 10
     
     confidence = min(confidence, 100)
@@ -180,7 +208,7 @@ def use_fallback_analysis(signal_data):
     
     # Determine recommendation
     if confidence >= 75:
-        recommendation = signal_type
+        recommendation = signal
     else:
         recommendation = "WAIT"
     
@@ -189,8 +217,8 @@ def use_fallback_analysis(signal_data):
         strengths.append("Strong trend")
     if volume_ratio > 1.5:
         strengths.append("High volume confirmation")
-    if (signal_type == 'BUY' and rsi < 50) or (signal_type == 'SELL' and rsi > 50):
-        strengths.append("Good momentum")
+    if waddah > 70:
+        strengths.append("Waddah explosive signal")
     
     concerns = []
     if adx < 20:
@@ -216,13 +244,14 @@ def home():
     return jsonify({
         "status": "online",
         "service": "AI Trading Signal Analyzer (FREE)",
-        "version": "2.0-Free",
-        "ai_model": "Hugging Face Mistral-7B (Free)",
+        "version": "2.1-Fixed",
+        "ai_model": "Hugging Face Llama-3.2-3B (Free)",
+        "api_endpoint": "router.huggingface.co",
         "endpoints": {
             "/analyze": "POST - Analyze trading signal",
             "/history": "GET - View recent analyses",
             "/health": "GET - Service health check",
-            "/test": "POST - Test with sample data"
+            "/test": "GET - Test with sample data"
         }
     })
 
@@ -232,7 +261,8 @@ def health():
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "ai_provider": "Hugging Face (FREE)"
+        "ai_provider": "Hugging Face (FREE)",
+        "api_endpoint": "router.huggingface.co"
     })
 
 @app.route('/analyze', methods=['POST'])
@@ -250,7 +280,11 @@ def analyze_signal():
                 "error": "No data received"
             }), 400
         
-        print(f"📊 Received signal: {data.get('symbol')} - {data.get('signal_type')}")
+        # ✅ FIXED: Support both field name formats
+        ticker = data.get('ticker') or data.get('symbol', 'UNKNOWN')
+        signal = data.get('signal') or data.get('signal_type', 'UNKNOWN')
+        
+        print(f"📊 Received signal: {ticker} - {signal}")
         
         # Analyze with FREE AI
         ai_result = analyze_with_free_ai(data)
@@ -258,9 +292,9 @@ def analyze_signal():
         # Combine original signal with AI analysis
         result = {
             "original_signal": {
-                "symbol": data.get('symbol'),
+                "ticker": ticker,
                 "price": data.get('price'),
-                "signal_type": data.get('signal_type'),
+                "signal": signal,
                 "base_confidence": data.get('confidence')
             },
             "ai_analysis": ai_result,
@@ -299,32 +333,53 @@ def get_history():
         "analyses": recent_analyses[-limit:]
     })
 
-@app.route('/test', methods=['POST'])
+@app.route('/test', methods=['GET'])
 def test_endpoint():
     """Test endpoint with sample data"""
     sample_data = {
-        "symbol": "BTCUSD",
-        "price": 45000,
-        "signal_type": "BUY",
+        "ticker": "BTCUSDT",
+        "signal": "BUY",
         "confidence": 75,
-        "rsi": 45,
-        "adx": 28,
-        "volume_ratio": 1.8,
-        "atr_percent": 2.5,
-        "vwap_position": "above",
-        "waddah_bullish": 80,
-        "waddah_bearish": 20,
-        "waddah_explosive": True,
-        "squeeze_status": "firing",
-        "squeeze_momentum": "bullish",
-        "supertrend": "bullish",
-        "mfi": 55,
-        "fisher": "rising",
-        "ema_alignment": "bullish",
-        "htf_trend": "up",
-        "pattern": "higher_highs"
+        "price": 45000,
+        "entry": 45000,
+        "stop_loss": 44500,
+        "take_profit": 46000,
+        "risk_reward": 2.0,
+        "timeframe": "5min",
+        "indicators": {
+            "rsi": 45,
+            "macd": 12.5,
+            "adx": 28,
+            "volume_ratio": 1.8,
+            "atr": 250,
+            "mfi": 55,
+            "fisher": -0.5,
+            "vwap": 44950
+        },
+        "scores": {
+            "trend": 85,
+            "momentum": 78,
+            "volatility": 90,
+            "volume": 88,
+            "waddah": 100,
+            "squeeze": 95,
+            "vwap": 80,
+            "supertrend": 85,
+            "mfi": 70,
+            "fisher": 75
+        },
+        "conditions": {
+            "waddah_explosive": True,
+            "squeeze_firing": True,
+            "strong_trend": True,
+            "high_volume": True,
+            "htf_aligned": True,
+            "supertrend_flip": False,
+            "vwap_cross": True
+        }
     }
     
+    print("🧪 Running test analysis...")
     ai_result = analyze_with_free_ai(sample_data)
     
     return jsonify({
@@ -336,15 +391,15 @@ def test_endpoint():
 
 if __name__ == '__main__':
     print("🚀 AI Trading Signal Analyzer Starting (FREE VERSION)...")
-    print("🤖 Using Hugging Face Mistral-7B (100% FREE)")
+    print("🤖 Using Hugging Face Llama-3.2-3B (100% FREE)")
+    print("✅ Fixed API endpoint: router.huggingface.co")
     print("📡 Endpoints:")
     print("   POST /analyze - Analyze trading signals")
     print("   GET  /history - View recent analyses")
-    print("   POST /test    - Test with sample data")
+    print("   GET  /test    - Test with sample data")
     print("   GET  /health  - Health check")
     print("\n💡 Get FREE Hugging Face token at: https://huggingface.co/settings/tokens")
-    print("   Or leave empty to use fallback logic-based analysis\n")
+    print("   Set as HF_API_TOKEN environment variable\n")
     
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
-
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
