@@ -15,7 +15,7 @@ CORS(app)
 
 # Configuration - Hugging Face is FREE!
 HF_API_TOKEN = os.environ.get('HF_API_TOKEN', 'your-token-here')
-HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+HF_API_URL = "https://router.huggingface.co/models/meta-llama/Llama-3.2-3B-Instruct"
 
 # Store recent analyses
 recent_analyses = []
@@ -347,3 +347,4 @@ if __name__ == '__main__':
     
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
+
