@@ -1,6 +1,6 @@
 """
 AI Trading Signal Analyzer Server - FREE VERSION
-Uses Hugging Face (100% Free) - FIXED for TradingView
+Uses Hugging Face (100% Free) - FIXED API Endpoint
 """
 
 from flask import Flask, request, jsonify
@@ -15,7 +15,8 @@ CORS(app)
 
 # Configuration - Hugging Face is FREE!
 HF_API_TOKEN = os.environ.get('HF_API_TOKEN', 'your-token-here')
-HF_API_URL = "https://router.huggingface.co/models/meta-llama/Llama-3.2-3B-Instruct"
+# ✅ FIXED: Correct Hugging Face Inference API endpoint
+HF_API_URL = "https://api-inference.huggingface.co/models/meta-llama/Llama-3.2-3B-Instruct"
 
 # Store recent analyses
 recent_analyses = []
@@ -85,12 +86,19 @@ REASON: [1-2 sentence explanation] [/INST]"""
         
         print(f"🤖 Calling Hugging Face AI (Llama-3.2)...")
         
-        # Call Hugging Face API
-        response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=30)
+        # Call Hugging Face API with longer timeout for model loading
+        response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=60)
         
         if response.status_code == 200:
             result = response.json()
-            ai_text = result[0]['generated_text'] if isinstance(result, list) else result.get('generated_text', '')
+            
+            # Handle different response formats
+            if isinstance(result, list) and len(result) > 0:
+                ai_text = result[0].get('generated_text', '')
+            elif isinstance(result, dict):
+                ai_text = result.get('generated_text', result.get('text', ''))
+            else:
+                ai_text = str(result)
             
             print(f"✅ AI Response received: {len(ai_text)} chars")
             
@@ -158,12 +166,25 @@ REASON: [1-2 sentence explanation] [/INST]"""
             }
         
         elif response.status_code == 503:
-            print("⏱️ Model is loading, using fallback...")
-            return use_fallback_analysis(signal_data)
+            print("⏱️ Model is loading, please wait 20 seconds and retry...")
+            return {
+                "success": False,
+                "error": "model_loading",
+                "message": "Model is loading. Please wait 20 seconds and retry.",
+                "estimated_time": 20
+            }
         else:
-            print(f"❌ API Error: {response.status_code} - {response.text}")
+            print(f"❌ API Error: {response.status_code}")
+            print(f"Response: {response.text}")
             return use_fallback_analysis(signal_data)
             
+    except requests.exceptions.Timeout:
+        print("⏱️ Request timeout - model may be loading")
+        return {
+            "success": False,
+            "error": "timeout",
+            "message": "Request timed out. Model may be loading, please retry in 20 seconds."
+        }
     except Exception as e:
         print(f"❌ AI Analysis Error: {e}")
         return use_fallback_analysis(signal_data)
@@ -244,9 +265,9 @@ def home():
     return jsonify({
         "status": "online",
         "service": "AI Trading Signal Analyzer (FREE)",
-        "version": "2.1-Fixed",
+        "version": "2.2-Fixed",
         "ai_model": "Hugging Face Llama-3.2-3B (Free)",
-        "api_endpoint": "router.huggingface.co",
+        "api_endpoint": "api-inference.huggingface.co",
         "endpoints": {
             "/analyze": "POST - Analyze trading signal",
             "/history": "GET - View recent analyses",
@@ -262,7 +283,7 @@ def health():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "ai_provider": "Hugging Face (FREE)",
-        "api_endpoint": "router.huggingface.co"
+        "api_endpoint": "api-inference.huggingface.co"
     })
 
 @app.route('/analyze', methods=['POST'])
@@ -288,6 +309,10 @@ def analyze_signal():
         
         # Analyze with FREE AI
         ai_result = analyze_with_free_ai(data)
+        
+        # Check if model is loading
+        if not ai_result.get('success') and ai_result.get('error') in ['model_loading', 'timeout']:
+            return jsonify(ai_result), 503
         
         # Combine original signal with AI analysis
         result = {
@@ -392,7 +417,7 @@ def test_endpoint():
 if __name__ == '__main__':
     print("🚀 AI Trading Signal Analyzer Starting (FREE VERSION)...")
     print("🤖 Using Hugging Face Llama-3.2-3B (100% FREE)")
-    print("✅ Fixed API endpoint: router.huggingface.co")
+    print("✅ Fixed API endpoint: api-inference.huggingface.co")
     print("📡 Endpoints:")
     print("   POST /analyze - Analyze trading signals")
     print("   GET  /history - View recent analyses")
